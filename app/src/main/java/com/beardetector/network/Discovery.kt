@@ -40,7 +40,7 @@ class Discovery {
 
                 while (isActive) {
                     try {
-                        val message = "BEAR_$mode:$localIp"
+                        val message = "BEAR_$mode"
                         val data = message.toByteArray()
                         val packet = DatagramPacket(
                             data, data.size,
@@ -75,19 +75,16 @@ class Discovery {
                         socket.receive(packet)
                         val message = String(packet.data, 0, packet.length)
 
-                        // Parse: BEAR_MODE:IP
+                        // Parse: BEAR_MODE — use the packet's source address, not the payload
                         if (message.startsWith("BEAR_")) {
-                            val parts = message.removePrefix("BEAR_").split(":", limit = 2)
-                            if (parts.size == 2) {
-                                val mode = parts[0]
-                                val ip = parts[1]
-                                val localIp = getLocalIpAddress()
-                                if (ip != localIp) {
-                                    synchronized(peers) {
-                                        peers[ip] = Pair(mode, System.currentTimeMillis())
-                                    }
-                                    onPeerFound(mode, ip)
+                            val mode = message.removePrefix("BEAR_").split(":", limit = 2)[0]
+                            val ip = packet.address.hostAddress ?: continue
+                            val localIp = getLocalIpAddress()
+                            if (ip != localIp) {
+                                synchronized(peers) {
+                                    peers[ip] = Pair(mode, System.currentTimeMillis())
                                 }
+                                onPeerFound(mode, ip)
                             }
                         }
                     } catch (e: Exception) {

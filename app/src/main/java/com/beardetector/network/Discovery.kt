@@ -44,7 +44,7 @@ class Discovery {
                         val data = message.toByteArray()
                         val packet = DatagramPacket(
                             data, data.size,
-                            InetAddress.getByName("255.255.255.255"), PORT
+                            getBroadcastAddress(), PORT
                         )
                         socket.send(packet)
                     } catch (e: Exception) {
@@ -141,5 +141,18 @@ class Discovery {
             }
         } catch (_: Exception) {}
         return "0.0.0.0"
+    }
+
+    private fun getBroadcastAddress(): InetAddress {
+        try {
+            for (intf in NetworkInterface.getNetworkInterfaces()) {
+                if (intf.isLoopback || !intf.isUp) continue
+                for (ifAddr in intf.interfaceAddresses) {
+                    val broadcast = ifAddr.broadcast
+                    if (broadcast != null) return broadcast
+                }
+            }
+        } catch (_: Exception) {}
+        return InetAddress.getByName("255.255.255.255")
     }
 }

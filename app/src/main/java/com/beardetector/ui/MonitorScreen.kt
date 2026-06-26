@@ -1,5 +1,10 @@
 package com.beardetector.ui
 
+import android.content.Context
+import android.content.Intent
+import android.net.Uri
+import android.os.PowerManager
+import android.provider.Settings
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -12,16 +17,16 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -30,48 +35,35 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.beardetector.network.AlertReceiver
-import com.beardetector.network.Discovery
-import com.beardetector.notification.NotificationHelper
+import com.beardetector.service.MonitorService
 import com.beardetector.ui.theme.AlertRed
 import com.beardetector.ui.theme.SafeGreen
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
 
 @Composable
 fun MonitorScreen(modifier: Modifier = Modifier, onBack: () -> Unit) {
     val context = LocalContext.current
-    val scope = rememberCoroutineScope()
-    var alertActive by remember { mutableStateOf(false) }
-    var alertCount by remember { mutableIntStateOf(0) }
-    var listenerCount by remember { mutableIntStateOf(0) }
+    var isRunning by remember { mutableStateOf(MonitorService.isRunning.value) }
+    val alertActive by MonitorService.alertActive.collectAsState()
+    val alertCount by MonitorService.alertCount.collectAsState()
+    val listenerCount by MonitorService.listenerCount.collectAsState()
+    val isListening by MonitorService.isListening.collectAsState()
 
-    // Start discovery and alert receiver
-    DisposableEffect(Unit) {
-        val discovery = Discovery()
-        val receiver = AlertReceiver()
-
-        discovery.startBroadcasting("MONITOR")
-        discovery.startListening { mode, _ ->
-            if (mode == "LISTEN") {
-                listenerCount = discovery.getPeerCount("LISTEN")
+    fun startMonitoring() {
+        // Prompt to disable battery optimization if needed (mirrors ListenScreen).
+        val pm = context.getSystemService(Context.POWER_SERVICE) as PowerManager
+        if (!pm.isIgnoringBatteryOptimizations(context.packageName)) {
+            val batteryIntent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+                data = Uri.parse("package:${context.packageName}")
             }
+            context.startActivity(batteryIntent)
         }
+        context.startForegroundService(Intent(context, MonitorService::class.java))
+        isRunning = true
+    }
 
-        receiver.startListening {
-            alertActive = true
-            alertCount++
-            NotificationHelper.showAlert(context)
-            scope.launch {
-                delay(5000)
-                alertActive = false
-            }
-        }
-
-        onDispose {
-            discovery.stop()
-            receiver.stop()
-        }
+    fun stopMonitoring() {
+        context.stopService(Intent(context, MonitorService::class.java))
+        isRunning = false
     }
 
     Column(
@@ -85,7 +77,10 @@ fun MonitorScreen(modifier: Modifier = Modifier, onBack: () -> Unit) {
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            TextButton(onClick = onBack) {
+            TextButton(onClick = {
+                if (isRunning) stopMonitoring()
+                onBack()
+            }) {
                 Text("Back")
             }
             Text(
@@ -131,12 +126,43 @@ fun MonitorScreen(modifier: Modifier = Modifier, onBack: () -> Unit) {
             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
         )
 
+        Spacer(modifier = Modifier.height(24.dp))
+
+        // Listen / Mute toggle — drives AudioPlayer playback on the service.
+        if (isRunning) {
+            Button(
+                onClick = { MonitorService.setListening(!isListening) },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(56.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = if (isListening) MaterialTheme.colorScheme.secondary
+                    else MaterialTheme.colorScheme.surfaceVariant
+                )
+            ) {
+                Text(
+                    text = if (isListening) "Mute" else "Listen",
+                    fontSize = 18.sp
+                )
+            }
+        }
+
         Spacer(modifier = Modifier.weight(1f))
 
-        Text(
-            text = "Listening for alerts on this network...",
-            fontSize = 14.sp,
-            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f)
-        )
+        // Start/Stop monitoring button
+        Button(
+            onClick = { if (isRunning) stopMonitoring() else startMonitoring() },
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(56.dp),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = if (isRunning) AlertRed else MaterialTheme.colorScheme.secondary
+            )
+        ) {
+            Text(
+                text = if (isRunning) "Stop Monitoring" else "Start Monitoring",
+                fontSize = 18.sp
+            )
+        }
     }
 }

@@ -8,6 +8,10 @@
     <!-- Foreground service -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+
+    <!-- Resume prompt after reboot -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
 
     <!-- Networking -->
     <uses-permission android:name="android.permission.INTERNET" />
@@ -47,6 +51,19 @@
             android:name=".service.ListenService"
             android:foregroundServiceType="microphone"
             android:exported="false" />
+
+        <service
+            android:name=".service.MonitorService"
+            android:foregroundServiceType="mediaPlayback"
+            android:exported="false" />
+
+        <receiver
+            android:name=".service.BootReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+            </intent-filter>
+        </receiver>
     </application>
 
 </manifest>

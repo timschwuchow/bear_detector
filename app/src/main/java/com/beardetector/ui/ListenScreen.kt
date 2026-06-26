@@ -32,6 +32,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.beardetector.service.BootReceiver
 import com.beardetector.service.ListenService
 import com.beardetector.ui.theme.AlertRed
 import com.beardetector.ui.theme.SafeGreen
@@ -58,6 +59,8 @@ fun ListenScreen(modifier: Modifier = Modifier, onBack: () -> Unit) {
         ) {
             TextButton(onClick = {
                 if (isRunning) {
+                    // Explicit stop: clear the flag so a later reboot won't prompt to resume.
+                    BootReceiver.setListenWasRunning(context, false)
                     context.stopService(Intent(context, ListenService::class.java))
                     isRunning = false
                 }
@@ -137,6 +140,8 @@ fun ListenScreen(modifier: Modifier = Modifier, onBack: () -> Unit) {
         Button(
             onClick = {
                 if (isRunning) {
+                    // Explicit stop: clear the flag so a later reboot won't prompt to resume.
+                    BootReceiver.setListenWasRunning(context, false)
                     context.stopService(Intent(context, ListenService::class.java))
                     isRunning = false
                 } else {

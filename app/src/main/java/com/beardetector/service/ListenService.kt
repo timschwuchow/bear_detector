@@ -13,6 +13,7 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 import com.beardetector.R
 import com.beardetector.network.AlertSender
+import com.beardetector.network.AudioStreamer
 import com.beardetector.network.Discovery
 import com.beardetector.notification.NotificationHelper
 import com.beardetector.util.SoundMeter
@@ -42,6 +43,7 @@ class ListenService : Service() {
     private var listenJob: Job? = null
     private val soundMeter = SoundMeter()
     private val discovery = Discovery()
+    private val audioStreamer = AudioStreamer()
     private var multicastLock: WifiManager.MulticastLock? = null
     private var wakeLock: PowerManager.WakeLock? = null
     private var lastAlertTime = 0L
@@ -49,6 +51,9 @@ class ListenService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        // Mark that listening was running so a reboot can prompt the user to resume.
+        // Cleared only on explicit user Stop (ListenScreen), so an OS-kill + reboot still prompts.
+        BootReceiver.setListenWasRunning(this, true)
         startForegroundNotification()
         acquireWakeLock()
         acquireMulticastLock()
@@ -62,6 +67,7 @@ class ListenService : Service() {
         super.onDestroy()
         listenJob?.cancel()
         soundMeter.stop()
+        audioStreamer.close()
         discovery.stop()
         releaseMulticastLock()
         releaseWakeLock()
@@ -132,8 +138,12 @@ class ListenService : Service() {
 
         listenJob = scope.launch {
             while (isActive) {
-                val amplitude = soundMeter.getAmplitude()
+                // Blocking read paces this loop (~23 ms/chunk) — no delay needed.
+                val chunk = soundMeter.readChunk() ?: continue
+                val amplitude = SoundMeter.rms(chunk)
                 currentAmplitude.value = amplitude
+
+                val monitors = discovery.getPeers("MONITOR")
 
                 if (amplitude > threshold.value) {
                     val now = System.currentTimeMillis()
@@ -142,7 +152,6 @@ class ListenService : Service() {
                         alertActive.value = true
                         Log.d(TAG, "Sound detected! Amplitude: $amplitude")
 
-                        val monitors = discovery.getPeers("MONITOR")
                         if (monitors.isNotEmpty()) {
                             AlertSender.sendAlert(monitors)
                         }
@@ -154,7 +163,8 @@ class ListenService : Service() {
                     }
                 }
 
-                delay(200) // Check every 200ms
+                // Always-on streaming: send every chunk to every discovered monitor.
+                audioStreamer.send(chunk, chunk.size, monitors)
             }
         }
     }

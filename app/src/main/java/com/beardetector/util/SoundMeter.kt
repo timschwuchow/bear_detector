@@ -59,13 +59,21 @@ class SoundMeter {
     }
 
     /**
-     * Blocking read of one [CHUNK_SAMPLES]-sample chunk from the mic.
-     * Returns the chunk when a full read succeeds, else null. The blocking read
-     * paces the caller's loop — no delay needed. Must run on a background thread.
+     * Blocking read of one [CHUNK_SAMPLES]-sample chunk from the mic. Must run on a
+     * background thread. Returns:
+     *  - a full [CHUNK_SAMPLES] buffer on a normal read,
+     *  - a buffer trimmed to the valid samples on a positive partial read,
+     *  - null when the recorder is gone, returns an error code (negative), or yields no
+     *    data. A null return means "don't spin" — the caller should back off, because an
+     *    error code (e.g. ERROR_DEAD_OBJECT) returns immediately rather than blocking.
      */
     fun readChunk(): ShortArray? {
         val buffer = ShortArray(CHUNK_SAMPLES)
         val read = recorder?.read(buffer, 0, CHUNK_SAMPLES) ?: return null
-        return if (read == CHUNK_SAMPLES) buffer else null
+        return when {
+            read == CHUNK_SAMPLES -> buffer
+            read > 0 -> buffer.copyOf(read) // partial read — keep the valid samples
+            else -> null                    // 0 (no data) or negative error code
+        }
     }
 }

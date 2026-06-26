@@ -31,6 +31,12 @@ class ListenService : Service() {
         private const val TAG = "ListenService"
         private const val NOTIFICATION_ID = 1001
         private const val ALERT_COOLDOWN_MS = 5000L
+        // Throttle the amplitude StateFlow to ~10 Hz; detection + streaming still run
+        // every chunk. Updating on every ~23 ms chunk recomposes the meter UI ~43x/sec.
+        private const val AMPLITUDE_UI_INTERVAL_MS = 100L
+        // Back-off after a failed mic read so an error code (which returns immediately
+        // instead of blocking) can't spin this loop at 100% CPU.
+        private const val READ_BACKOFF_MS = 100L
 
         val isRunning = MutableStateFlow(false)
         val currentAmplitude = MutableStateFlow(0.0)
@@ -47,6 +53,7 @@ class ListenService : Service() {
     private var multicastLock: WifiManager.MulticastLock? = null
     private var wakeLock: PowerManager.WakeLock? = null
     private var lastAlertTime = 0L
+    private var lastAmplitudeUpdate = 0L
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -138,15 +145,25 @@ class ListenService : Service() {
 
         listenJob = scope.launch {
             while (isActive) {
-                // Blocking read paces this loop (~23 ms/chunk) — no delay needed.
-                val chunk = soundMeter.readChunk() ?: continue
+                // Blocking read normally paces this loop (~23 ms/chunk). null means the
+                // mic errored or returned no data — back off so we don't busy-spin.
+                val chunk = soundMeter.readChunk()
+                if (chunk == null) {
+                    delay(READ_BACKOFF_MS)
+                    continue
+                }
                 val amplitude = SoundMeter.rms(chunk)
-                currentAmplitude.value = amplitude
+
+                val now = System.currentTimeMillis()
+                // Throttle UI updates; detection and streaming below run every chunk.
+                if (now - lastAmplitudeUpdate > AMPLITUDE_UI_INTERVAL_MS) {
+                    currentAmplitude.value = amplitude
+                    lastAmplitudeUpdate = now
+                }
 
                 val monitors = discovery.getPeers("MONITOR")
 
                 if (amplitude > threshold.value) {
-                    val now = System.currentTimeMillis()
                     if (now - lastAlertTime > ALERT_COOLDOWN_MS) {
                         lastAlertTime = now
                         alertActive.value = true
